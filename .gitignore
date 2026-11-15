@@ -1,0 +1,29 @@
+# Build
+build/
+cmake-build-*/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+*.dis
+*.lst
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+.pico-sdk/
+
+# IDE / OS
+.vscode/.ropeproject
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Local SDK path overrides (keep pico_sdk_import.cmake)
+sdk/
