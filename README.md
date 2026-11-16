@@ -1,5 +1,128 @@
 # Pico temperature link
 
+Two Raspberry Pi boards: a **sender** (BME280 sensor) and a **receiver** (16×2 LCD). They talk over **UART** using a small protocol with **CRC-16 Modbus**. The sender sleeps most of the time and wakes when the receiver sends a frame.
+
+Planned extensions: **BLE** transport (`libraries/ble/`, not in the main build yet), a single board with LCD + sensor, and reception on a **Raspberry Pi**.
+
+## Hardware
+
+| Role | Board (default) | Peripherals |
+|------|-----------------|-------------|
+| Sender | Pico 2 W (RP2350) | BME280 on I2C |
+| Receiver | Pico W (RP2040) | I2C LCD (e.g. PCF8574), button |
+
+### Pins (same on both boards)
+
+| Function | GPIO |
+|----------|------|
+| I2C SDA | 4 |
+| I2C SCL | 5 |
+| UART TX | 0 |
+| UART RX | 1 |
+| Button (receiver) | 15 |
+
+- **BME280**: address `0x76`
+- **LCD**: address `0x27` (typical I2C backpack)
+
+### UART wiring
+
+You need **two data wires** and ground:
+
+```
+Sender GP0 (TX) ──► Receiver GP1 (RX)
+Receiver GP0 (TX) ──► Sender GP1 (RX)
+GND ── GND
+```
+
+115200 8N1, binary frames (not ASCII).
+
+## Behavior
+
+- **Sender**: starts asleep. On `GET`, measures temperature (BME280, forced mode), sends one `TEMP` frame, powers down the sensor and CYW43, returns to dormant on UART RX falling edge. On `PING`, replies with `PONG` without measuring. **30 °C** threshold — onboard LED blinks briefly after alarm (needs CYW43 on for a moment).
+- **Receiver**:
+  - **short press**: preamble (`0x00` bytes), `GET`, wait for `TEMP`, show result on LCD (blank after 30 s),
+  - **long press** (~0.7 s): link test `PING` / `PONG`, message on LCD,
+  - LED blinks in the background.
+
+Sender logs: **USB**. Receiver logs: **USB** (UART is not used for stdio).
+
+## Frame protocol
+
+```
+AA | VER | TYPE | LEN | PAYLOAD… | CRC_LO | CRC_HI | 55
+```
+
+| Field | Description |
+|-------|-------------|
+| `AA` | SOF |
+| `VER` | `0x01` |
+| `TYPE` | see below |
+| `LEN` | payload length (bytes) |
+| CRC | CRC-16 Modbus over `[VER … last payload byte]`, **little-endian** on the wire |
+| `55` | EOF |
+
+| Type | Value | Payload |
+|------|-------|---------|
+| PING | `0x01` | empty — link test |
+| PONG | `0x02` | empty |
+| TEMP | `0x10` | 2 B: `int16` temperature × 100, LE |
+| GET | `0x12` | empty — request one measurement |
+
+Implementation: `libraries/crc/`.
+
+## Build
+
+Requires: [Pico SDK](https://github.com/raspberrypi/pico-sdk) (sender uses **`pico_low_power`** — recent SDK versions), CMake ≥ 3.13, ARM toolchain.
+
+After cloning, point to the SDK via environment variable or CMake:
+
+```bash
+export PICO_SDK_PATH=/path/to/pico-sdk
+# or on first configure:
+# cmake -DPICO_SDK_FETCH_FROM_GIT=ON ...
+```
+
+Do **not** reuse one `build/` directory for sender and receiver (different platform: RP2350 vs RP2040).
+
+```bash
+# Sender (Pico 2 W)
+cmake -B build/sender -S . -DMODE=SENDER
+cmake --build build/sender
+
+# Receiver (Pico W)
+cmake -B build/receiver -S . -DMODE=RECEIVER
+cmake --build build/receiver
+```
+
+`.uf2` files appear under `build/`. Flash each board (hold BOOTSEL + USB).
+
+In VS Code with the Pico extension you can set `MODE` in the CMake cache.
+
+## Repository layout
+
+```
+sender/main.c          # sleep, respond to GET/PING
+receiver/main.c        # LCD, button, polling
+libraries/crc/         # protocol and CRC
+libraries/uart/        # UART, preamble, stream parser
+libraries/sensor/      # BME280
+libraries/lcd/         # HD44780 over I2C
+libraries/button/
+libraries/ble/         # BLE sketch (advertising), not in CMakeLists
+```
+
+## BLE (experimental)
+
+`libraries/ble/` mirrors the same frame format in **Manufacturer Specific Data** (`BLE_COMPANY_ID = 0xFFFF` — developer ID, not registered). To enable, add `ble.c` to the target, the include path for `btstack_config.h`, and BTstack libraries in `CMakeLists.txt` (see comment in `libraries/ble/ble.h`).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+# Połączenie temperatury Pico
+
 Dwie płytki Raspberry Pi: **nadajnik** (czujnik BME280) i **odbiornik** (wyświetlacz LCD 16×2). Łączą się po **UART** prostym protokołem z **CRC-16 Modbus**. Nadajnik większość czasu śpi i budzi się, gdy odbiornik wyśle ramkę.
 
 Planowane rozszerzenia: transmisja po **BLE** (`libraries/ble/`, na razie poza głównym buildem), pojedyncza wyspa z LCD + czujnik, odbiór na **Raspberry Pi**.
